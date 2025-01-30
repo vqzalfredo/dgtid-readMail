@@ -1,0 +1,179 @@
+<?php
+//	$_POST['accion'] = 'santander-mail';
+//	$_POST['debug'] = 1;
+
+	if( isset( $_POST['accion'] ) )
+	{
+		$accion = $_POST['accion'];
+		$debug = ( isset( $_POST['debug'] ) )? 1 : 0;
+
+		switch($accion)
+		{
+			case 'santander-mail':
+				$servidor	= 'mail.finanzasoaxaca.gob.mx';
+				$usuario	= 'buzon.santander@finanzasoaxaca.gob.mx';
+				$password	= 's4nt4nd3r';
+
+				$asunto		= 'Estado de Cuenta';
+				$remitente = 'banca_electronica@santander.com.mx';
+
+//				$asunto    = 'Consulta Programada';
+//				$remitente = 'notificaciones@notificaciones.santander.com.mx';
+
+				$fecha = date("j M Y"); 
+				
+				error_reporting(E_ALL & ~E_NOTICE & ~E_USER_NOTICE);
+
+				if( @$conn = imap_open('{'.$servidor.'/notls}', $usuario, $password, OP_READONLY) )
+				{
+					// FROM "' . $remitente . '" 
+					$email = imap_search($conn, 'SUBJECT "' . $asunto . '" ON "' . $fecha . '"', SE_UID);
+					//$email = imap_search($conn, 'ALL', SE_UID);
+					$resultados = count( $email );
+
+					//echo '<pre>';
+					if( $debug ) echo 'Resultados: ' . $resultados . "\n";
+					$archivos_procesados = 0;
+
+					if( PHP_OS == 'WINNT' ) $path = '';
+					else $path = '/tmp/';
+
+					function descarga_adjuntos( $conn, $nodo, $j, $id )
+					{
+						global $debug;
+						global $path;
+						global $archivos_procesados;
+
+						foreach( $nodo as $obj )
+						{
+							if( isset( $obj->parts ) )
+							{
+								$j++;
+								descarga_adjuntos( $conn, $obj->parts, $j, $id );
+							}
+							else
+							{
+								$tipo = $obj->subtype;
+				//				error_log( $obj->subtype );
+								if( $obj->ifdparameters == 1 )
+								{
+									foreach($obj->dparameters as $adjunto) {
+										$posicion = 2;
+										$name = $adjunto->value;
+
+										if( $j > 1 ) $posicion = $posicion.".".$j;
+
+										$data = imap_fetchbody($conn, $id, $posicion, FT_UID);
+										//print_r( $data );
+
+										if( $obj->encoding == 3 ) { $data = base64_decode($data); }
+										elseif ($obj->encoding == 4) { $data = quoted_printable_decode($data); }
+									//	error_log( $obj->encoding );										
+										
+										$archivo = $path . $name;
+
+										if( $debug ) echo 'Procesado: ' . $tipo . ' | ' . $name . "\n";
+
+										file_put_contents( $archivo, $data );
+
+										@chdir('/mnt/automata_santander');
+
+										if( $tipo == 'MS-TNEF' )
+										{
+											shell_exec('/opt/csw/bin/tnef ' . $archivo);
+											shell_exec('rm ' . $archivo);
+											shell_exec('gunzip *.gz');
+											shell_exec('rm *.gz');
+										}
+										else// if( $tipo == 'X-GZIP' || $tipo == 'OCTET-STREAM' )
+										{
+											shell_exec('mv ' . $archivo . ' /mnt/automata_santander');
+											shell_exec('chmod 527:109' . $archivo);
+											shell_exec('rm -rf santanderHeader.jpg');
+											shell_exec('gunzip *.gz');
+											shell_exec('rm *.gz');
+								//			shell_exec('unzip *.zip');
+                                                                //  	 		shell_exec('rm *.zip');
+										}
+
+										$archivos_procesados++;
+									}
+								}
+							}
+						}
+					}
+
+					//if( $debug ) print_r( $email );
+
+					for($i = 1; $i <=$resultados; $i++)
+					{
+						if( $debug ) echo 'Mail ID: ' . $email[$i-1] . "\n";
+
+						$estructura = imap_fetchstructure($conn, $email[$i-1], FT_UID );
+
+						//if( $debug ) print_r( $estructura );
+
+						if( $debug && $i > 1) echo "-----------------------------------------------------------------------------\n";
+
+						if( count( $estructura->parts ) > 0 )
+						{
+							descarga_adjuntos($conn, $estructura->parts, 1, $email[$i-1] );
+						}
+					}
+				}
+				if( $debug ) echo 'Total Archivos Procesados: ', $archivos_procesados, "\n";
+			break;
+		}
+		exit;
+	}
+?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+        <head>
+                <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+                <title>Secretaría de Finanzas</title>
+                <link rel="icon" type="image/vnd.microsoft.icon" href="<?php echo $_SERVER['REQUEST_SCHEME']; ?>://apache.finanzasoaxaca.gob.mx/static/images/icon/sefinesc0.ico" />
+                <style type="text/css">
+                        html{height:100%; margin: 0; font-family:verndana, tahoma}
+                        body{background: #FFF url(<?php echo $_SERVER['REQUEST_SCHEME']; ?>://apache.finanzasoaxaca.gob.mx/static/images/background/sefinbg0.png) no-repeat fixed top; height:100%; margin:0}
+                        body>div{background: url(<?php echo $_SERVER['REQUEST_SCHEME']; ?>://apache.finanzasoaxaca.gob.mx/static/images/logo/UT_DepOprSopTec.png) no-repeat fixed center; width:90%; height:90%; padding:40px}
+                </style>
+        </head>
+        <body>
+                <div>
+<H1>Ok!</H1>
+<?php
+	if( isset( $_GET['id'] ) )
+	{
+		switch( $_GET['id'] )
+		{
+			case md5('sefin_osticket'):
+				$sistema = 'osticket';
+			break;
+			case md5('sefin_cbi'):
+				$sistema = 'cbi';
+			break;
+                        case md5('sefin_dsinpres'):
+                                $sistema = 'dsinpres';
+                        break;
+			default:
+				$sistema = '';
+			break;
+		}
+
+		if( $sistema != '' )
+		{
+			$ip = $_SERVER['REMOTE_ADDR'];
+			echo "Sincronizando <b>{$sistema}</b><br />";
+			echo '<pre>';
+			print_r( shell_exec("bash /scripts/sync_www.sh {$sistema} {$ip}") );
+			echo '</pre>';
+		}
+	}
+#	echo "<pre>";
+#	print_r($_SERVER);
+#	echo "</pre>";
+?>
+		</div>
+        </body>
+</html>
